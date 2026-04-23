@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Minesweeper</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #161a22; --accent: #4ade80; --accent-2: #22d3ee;
+    --text: #e5e7eb; --muted: #9ca3af; --danger: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #1b2030 0%, var(--bg) 60%);
+    color: var(--text);
+  }
+  .app { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 32px 16px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+  h1 {
+    font-size: 28px; margin: 0;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  a.back { color: var(--muted); text-decoration: none; font-size: 14px; }
+  a.back:hover { color: var(--accent); }
+  .hud { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; justify-content: center; }
+  .chip { background: var(--panel); padding: 8px 14px; border-radius: 10px; font-size: 14px; color: var(--muted); }
+  .chip b { color: var(--text); }
+  button, select {
+    background: var(--panel); color: var(--text); border: 1px solid #262b37;
+    padding: 8px 12px; border-radius: 10px; cursor: pointer; font-size: 14px;
+  }
+  button:hover { border-color: var(--accent); }
+  .board {
+    display: grid; gap: 2px; background: #1c2130; padding: 6px; border-radius: 10px;
+    touch-action: manipulation;
+  }
+  .c {
+    width: 28px; height: 28px; background: #3a4258; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; cursor: pointer; user-select: none;
+  }
+  .c:hover { background: #454e66; }
+  .c.r { background: #242a3b; cursor: default; }
+  .c.m { background: var(--danger); color: #fff; }
+  .c.f { background: #3a4258; color: #fbbf24; }
+  .c1 { color: #60a5fa; } .c2 { color: #4ade80; } .c3 { color: #f87171; }
+  .c4 { color: #a78bfa; } .c5 { color: #fb923c; } .c6 { color: #22d3ee; }
+  .c7 { color: #e5e7eb; } .c8 { color: #9ca3af; }
+  .msg { margin-top: 12px; color: var(--muted); font-size: 14px; min-height: 20px; }
+  .hint { margin-top: 4px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Minesweeper</h1>
+    <a class="back" href="../">← all games</a>
+  </header>
+  <div class="hud">
+    <div class="chip">💣 <b id="mines">0</b></div>
+    <div class="chip">⏱ <b id="time">0</b></div>
+    <select id="diff">
+      <option value="9,9,10">Easy (9×9, 10)</option>
+      <option value="16,16,40" selected>Medium (16×16, 40)</option>
+      <option value="24,16,80">Hard (24×16, 80)</option>
+    </select>
+    <button id="reset">New Game</button>
+  </div>
+  <div class="board" id="board"></div>
+  <div class="msg" id="msg">Left click reveal, right click flag.</div>
+  <div class="hint">On mobile: tap to reveal, long-press to flag.</div>
+</div>
+<script>
+const boardEl = document.getElementById('board');
+const minesEl = document.getElementById('mines');
+const timeEl = document.getElementById('time');
+const msgEl = document.getElementById('msg');
+const diffEl = document.getElementById('diff');
+let W, H, MINES, grid, revealed, flagged, started, over, timer, secs, cellsLeft;
+
+function reset() {
+  const [w,h,m] = diffEl.value.split(',').map(Number);
+  W = w; H = h; MINES = m;
+  grid = Array.from({length: H}, () => Array(W).fill(0));
+  revealed = Array.from({length: H}, () => Array(W).fill(false));
+  flagged = Array.from({length: H}, () => Array(W).fill(false));
+  started = false; over = false; secs = 0;
+  cellsLeft = W*H - MINES;
+  clearInterval(timer); timeEl.textContent = '0';
+  minesEl.textContent = MINES;
+  msgEl.textContent = 'Left click reveal, right click flag.';
+  render();
+}
+function placeMines(safeR, safeC) {
+  let placed = 0;
+  while (placed < MINES) {
+    const r = Math.floor(Math.random()*H), c = Math.floor(Math.random()*W);
+    if (grid[r][c] === -1) continue;
+    if (Math.abs(r-safeR) <= 1 && Math.abs(c-safeC) <= 1) continue;
+    grid[r][c] = -1; placed++;
+  }
+  for (let r=0;r<H;r++) for (let c=0;c<W;c++) {
+    if (grid[r][c] === -1) continue;
+    let n = 0;
+    for (let dr=-1;dr<=1;dr++) for (let dc=-1;dc<=1;dc++) {
+      const rr=r+dr, cc=c+dc;
+      if (rr>=0&&rr<H&&cc>=0&&cc<W&&grid[rr][cc]===-1) n++;
+    }
+    grid[r][c] = n;
+  }
+}
+function render() {
+  boardEl.style.gridTemplateColumns = `repeat(${W}, 28px)`;
+  boardEl.innerHTML = '';
+  for (let r=0;r<H;r++) for (let c=0;c<W;c++) {
+    const d = document.createElement('div');
+    d.className = 'c';
+    if (revealed[r][c]) {
+      d.classList.add('r');
+      if (grid[r][c] === -1) { d.classList.add('m'); d.textContent = '💣'; }
+      else if (grid[r][c] > 0) { d.classList.add('c'+grid[r][c]); d.textContent = grid[r][c]; }
+    } else if (flagged[r][c]) {
+      d.classList.add('f'); d.textContent = '⚑';
+    }
+    d.oncontextmenu = e => { e.preventDefault(); flag(r,c); };
+    d.onclick = () => reveal(r,c);
+    let pressTimer;
+    d.addEventListener('touchstart', e => {
+      pressTimer = setTimeout(() => { flag(r,c); pressTimer = null; }, 400);
+    }, {passive:true});
+    d.addEventListener('touchend', e => {
+      if (pressTimer) { clearTimeout(pressTimer); }
+    });
+    d.addEventListener('touchmove', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } });
+    boardEl.appendChild(d);
+  }
+}
+function startTimer() {
+  timer = setInterval(() => { secs++; timeEl.textContent = secs; }, 1000);
+}
+function reveal(r, c) {
+  if (over || revealed[r][c] || flagged[r][c]) return;
+  if (!started) { placeMines(r,c); started = true; startTimer(); }
+  revealed[r][c] = true;
+  if (grid[r][c] === -1) return gameOver(false);
+  cellsLeft--;
+  if (grid[r][c] === 0) {
+    for (let dr=-1;dr<=1;dr++) for (let dc=-1;dc<=1;dc++) {
+      const rr=r+dr, cc=c+dc;
+      if (rr>=0&&rr<H&&cc>=0&&cc<W&&!revealed[rr][cc]) reveal(rr,cc);
+    }
+  }
+  if (cellsLeft === 0) return gameOver(true);
+  render();
+}
+function flag(r, c) {
+  if (over || revealed[r][c]) return;
+  flagged[r][c] = !flagged[r][c];
+  render();
+}
+function gameOver(won) {
+  over = true;
+  clearInterval(timer);
+  for (let r=0;r<H;r++) for (let c=0;c<W;c++) if (grid[r][c] === -1) revealed[r][c] = true;
+  render();
+  msgEl.textContent = won ? `You won in ${secs}s!` : 'Boom! Try again.';
+}
+document.getElementById('reset').onclick = reset;
+diffEl.onchange = reset;
+reset();
+</script>
+</body>
+</html>
